@@ -40,7 +40,7 @@
 
         <activity
             android:name="com.blink.pos.companion.MainActivity"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:theme="@style/Theme.PosPrinter"
             android:exported="true">
             
             <!-- Deep link handler -->

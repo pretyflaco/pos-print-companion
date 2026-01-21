@@ -7,6 +7,7 @@ import android.bluetooth.BluetoothSocket;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.os.Build;
 import android.util.Log;
 
 import androidx.core.app.ActivityCompat;
@@ -20,21 +21,6 @@ import java.util.UUID;
 
 /**
  * BluetoothPrinterManager - Handles printing to generic Bluetooth thermal printers
- * 
- * This class provides connectivity to standard Bluetooth SPP (Serial Port Profile)
- * thermal printers like:
- * - Netum (PT-210, etc.)
- * - MUNBYN
- * - GOOJPRT
- * - Epson TM-series (Bluetooth models)
- * - POS-5802, POS-5805
- * - And most other ESC/POS compatible Bluetooth printers
- * 
- * Features:
- * - Auto-discovery of paired Bluetooth printers
- * - Remembers last used printer
- * - Sends raw ESC/POS commands
- * - Connection retry logic
  */
 public class BluetoothPrinterManager {
     private static final String TAG = "BluetoothPrinterManager";
@@ -42,70 +28,93 @@ public class BluetoothPrinterManager {
     // Standard SPP UUID for serial port profile
     private static final UUID SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
     
-    // Preferences for storing last used printer
     private static final String PREFS_NAME = "BlinkPrintCompanion";
     private static final String PREF_LAST_PRINTER = "last_bluetooth_printer";
     
     private Context context;
     private BluetoothAdapter bluetoothAdapter;
-    private BluetoothSocket currentSocket;
     private SharedPreferences prefs;
     
-    // Common thermal printer names/patterns for auto-detection
+    // Common thermal printer names/patterns
     private static final String[] PRINTER_NAME_PATTERNS = {
         "PT-", "POS-", "MTP-", "RPP", "SPP", "Printer", "PRINT",
         "Thermal", "Receipt", "NETUM", "MUNBYN", "GOOJPRT",
         "BlueTooth Printer", "Bluetooth Printer", "BT Printer",
-        "58mm", "80mm", "Mini Printer"
+        "58mm", "80mm", "Mini Printer",
+        "MP-", "MP5", "MP583"  // Mobile printer patterns
     };
 
     public BluetoothPrinterManager(Context context) {
         this.context = context;
-        this.bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
+        try {
+            this.bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to get BluetoothAdapter", e);
+            this.bluetoothAdapter = null;
+        }
         this.prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
     }
 
-    /**
-     * Check if Bluetooth is available and enabled
-     */
     public boolean isBluetoothAvailable() {
-        return bluetoothAdapter != null && bluetoothAdapter.isEnabled();
+        try {
+            return bluetoothAdapter != null && bluetoothAdapter.isEnabled();
+        } catch (Exception e) {
+            Log.e(TAG, "Error checking Bluetooth", e);
+            return false;
+        }
     }
 
-    /**
-     * Get list of paired Bluetooth devices that look like printers
-     */
     public List<BluetoothDevice> getPairedPrinters() {
         List<BluetoothDevice> printers = new ArrayList<>();
         
-        if (!isBluetoothAvailable()) {
-            Log.w(TAG, "Bluetooth not available");
-            return printers;
-        }
-        
-        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) 
-                != PackageManager.PERMISSION_GRANTED) {
-            Log.w(TAG, "Missing BLUETOOTH_CONNECT permission");
-            return printers;
-        }
-        
-        Set<BluetoothDevice> pairedDevices = bluetoothAdapter.getBondedDevices();
-        
-        for (BluetoothDevice device : pairedDevices) {
-            String name = device.getName();
-            if (name != null && isProbablyPrinter(name)) {
-                printers.add(device);
-                Log.d(TAG, "Found paired printer: " + name + " (" + device.getAddress() + ")");
+        try {
+            if (!isBluetoothAvailable()) {
+                Log.w(TAG, "Bluetooth not available");
+                return printers;
             }
+            
+            if (!hasBluetoothPermission()) {
+                Log.w(TAG, "Missing BLUETOOTH_CONNECT permission");
+                return printers;
+            }
+            
+            Set<BluetoothDevice> pairedDevices = bluetoothAdapter.getBondedDevices();
+            if (pairedDevices == null) {
+                return printers;
+            }
+            
+            for (BluetoothDevice device : pairedDevices) {
+                try {
+                    String name = device.getName();
+                    if (name != null && isProbablyPrinter(name)) {
+                        printers.add(device);
+                        Log.d(TAG, "Found printer: " + name + " (" + device.getAddress() + ")");
+                    }
+                } catch (SecurityException e) {
+                    Log.w(TAG, "Permission error getting device name", e);
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting paired printers", e);
         }
         
         return printers;
     }
+    
+    private boolean hasBluetoothPermission() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                return ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) 
+                        == PackageManager.PERMISSION_GRANTED;
+            }
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
 
-    /**
-     * Check if device name looks like a thermal printer
-     */
     private boolean isProbablyPrinter(String name) {
+        if (name == null) return false;
         String upperName = name.toUpperCase();
         for (String pattern : PRINTER_NAME_PATTERNS) {
             if (upperName.contains(pattern.toUpperCase())) {
@@ -117,12 +126,11 @@ public class BluetoothPrinterManager {
 
     /**
      * Print raw ESC/POS data to a Bluetooth printer
-     * 
-     * @param data ESC/POS command bytes
-     * @param address Optional specific Bluetooth address. If null, uses last printer or first found.
-     * @return true if print was successful
+     * Will try multiple printers if the first one fails
      */
     public boolean printRaw(byte[] data, String address) {
+        Log.d(TAG, "printRaw called, data size: " + (data != null ? data.length : 0));
+        
         if (data == null || data.length == 0) {
             Log.e(TAG, "No data to print");
             return false;
@@ -133,138 +141,258 @@ public class BluetoothPrinterManager {
             return false;
         }
         
-        // Find the target printer
-        BluetoothDevice printer = findPrinter(address);
-        if (printer == null) {
-            Log.e(TAG, "No printer found");
+        if (!hasBluetoothPermission()) {
+            Log.e(TAG, "No Bluetooth permission");
             return false;
         }
         
-        // Connect and print
-        return connectAndPrint(printer, data);
-    }
-
-    /**
-     * Find a printer by address, or fall back to last used / first available
-     */
-    private BluetoothDevice findPrinter(String address) {
-        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) 
-                != PackageManager.PERMISSION_GRANTED) {
-            Log.e(TAG, "Missing BLUETOOTH_CONNECT permission");
-            return null;
+        // Cancel any ongoing discovery
+        try {
+            bluetoothAdapter.cancelDiscovery();
+        } catch (Exception e) {
+            Log.w(TAG, "Could not cancel discovery", e);
         }
         
-        // If specific address provided, use it
+        // Build list of printers to try
+        List<BluetoothDevice> printersToTry = new ArrayList<>();
+        
+        // If specific address provided, try it first
         if (address != null && !address.isEmpty()) {
             try {
                 BluetoothDevice device = bluetoothAdapter.getRemoteDevice(address);
                 if (device != null) {
-                    Log.d(TAG, "Using specified printer: " + address);
-                    return device;
+                    printersToTry.add(device);
+                    Log.d(TAG, "Will try specified printer first: " + address);
                 }
             } catch (IllegalArgumentException e) {
-                Log.e(TAG, "Invalid Bluetooth address: " + address);
+                Log.e(TAG, "Invalid address: " + address);
             }
         }
         
-        // Try last used printer
+        // Add last used printer if not already in list
         String lastPrinter = prefs.getString(PREF_LAST_PRINTER, null);
-        if (lastPrinter != null) {
+        if (lastPrinter != null && !lastPrinter.equals(address)) {
             try {
                 BluetoothDevice device = bluetoothAdapter.getRemoteDevice(lastPrinter);
                 if (device != null && device.getBondState() == BluetoothDevice.BOND_BONDED) {
-                    Log.d(TAG, "Using last printer: " + device.getName());
-                    return device;
+                    printersToTry.add(device);
+                    Log.d(TAG, "Will try last printer: " + lastPrinter);
                 }
-            } catch (IllegalArgumentException e) {
-                Log.w(TAG, "Last printer no longer valid");
+            } catch (Exception e) {
+                Log.w(TAG, "Last printer not valid", e);
             }
         }
         
-        // Fall back to first paired printer found
-        List<BluetoothDevice> printers = getPairedPrinters();
-        if (!printers.isEmpty()) {
-            BluetoothDevice printer = printers.get(0);
-            Log.d(TAG, "Using first available printer: " + printer.getName());
-            return printer;
+        // Add all other paired printers
+        List<BluetoothDevice> allPrinters = getPairedPrinters();
+        for (BluetoothDevice p : allPrinters) {
+            boolean alreadyInList = false;
+            for (BluetoothDevice existing : printersToTry) {
+                if (existing.getAddress().equals(p.getAddress())) {
+                    alreadyInList = true;
+                    break;
+                }
+            }
+            if (!alreadyInList) {
+                printersToTry.add(p);
+            }
+        }
+        
+        if (printersToTry.isEmpty()) {
+            Log.e(TAG, "No printers found");
+            return false;
+        }
+        
+        Log.d(TAG, "Will try " + printersToTry.size() + " printer(s)");
+        
+        // Try each printer until one works
+        for (BluetoothDevice printer : printersToTry) {
+            String printerName = "unknown";
+            try {
+                printerName = printer.getName();
+            } catch (SecurityException e) {
+                // ignore
+            }
+            
+            Log.d(TAG, "Trying printer: " + printerName + " (" + printer.getAddress() + ")");
+            
+            boolean success = tryPrintToDevice(printer, data);
+            
+            if (success) {
+                Log.d(TAG, "Print successful to: " + printerName);
+                // Save this as the last working printer
+                prefs.edit().putString(PREF_LAST_PRINTER, printer.getAddress()).apply();
+                return true;
+            }
+            
+            Log.d(TAG, "Failed to print to " + printerName + ", trying next...");
+            
+            // Wait before trying next printer
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+                // ignore
+            }
+        }
+        
+        Log.e(TAG, "All printers failed");
+        return false;
+    }
+    
+    /**
+     * Try to print to a specific device using all connection methods
+     */
+    private boolean tryPrintToDevice(BluetoothDevice printer, byte[] data) {
+        // Small delay to let any previous connection fully close
+        try {
+            Thread.sleep(200);
+        } catch (InterruptedException e) {
+            // ignore
+        }
+        
+        // Try primary connection method (SPP UUID)
+        boolean success = connectAndPrint(printer, data);
+        
+        if (!success) {
+            Log.d(TAG, "Primary method failed, trying fallback channel 1...");
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+                // ignore
+            }
+            success = tryFallbackConnection(printer, data, 1);
+        }
+        
+        if (!success) {
+            Log.d(TAG, "Channel 1 failed, trying channel 2...");
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+                // ignore
+            }
+            success = tryFallbackConnection(printer, data, 2);
+        }
+        
+        if (!success) {
+            Log.d(TAG, "Channel 2 failed, trying channel 3...");
+            try {
+                Thread.sleep(300);
+            } catch (InterruptedException e) {
+                // ignore
+            }
+            success = tryFallbackConnection(printer, data, 3);
+        }
+        
+        if (!success) {
+            Log.d(TAG, "All secure methods failed, trying insecure connection...");
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+                // ignore
+            }
+            success = tryInsecureConnection(printer, data);
+        }
+        
+        return success;
+    }
+
+    private BluetoothDevice findPrinter(String address) {
+        try {
+            // If specific address provided, use it
+            if (address != null && !address.isEmpty()) {
+                try {
+                    BluetoothDevice device = bluetoothAdapter.getRemoteDevice(address);
+                    if (device != null) {
+                        Log.d(TAG, "Using specified printer: " + address);
+                        return device;
+                    }
+                } catch (IllegalArgumentException e) {
+                    Log.e(TAG, "Invalid address: " + address);
+                }
+            }
+            
+            // Try last used printer
+            String lastPrinter = prefs.getString(PREF_LAST_PRINTER, null);
+            if (lastPrinter != null) {
+                try {
+                    BluetoothDevice device = bluetoothAdapter.getRemoteDevice(lastPrinter);
+                    if (device != null && device.getBondState() == BluetoothDevice.BOND_BONDED) {
+                        Log.d(TAG, "Using last printer: " + lastPrinter);
+                        return device;
+                    }
+                } catch (Exception e) {
+                    Log.w(TAG, "Last printer not valid", e);
+                }
+            }
+            
+            // Fall back to first paired printer
+            List<BluetoothDevice> printers = getPairedPrinters();
+            if (!printers.isEmpty()) {
+                BluetoothDevice printer = printers.get(0);
+                Log.d(TAG, "Using first available: " + printer.getName());
+                return printer;
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error finding printer", e);
         }
         
         return null;
     }
 
     /**
-     * Connect to printer and send data
+     * Primary connection method using createRfcommSocketToServiceRecord
      */
     private boolean connectAndPrint(BluetoothDevice printer, byte[] data) {
         BluetoothSocket socket = null;
         OutputStream outputStream = null;
         
         try {
-            if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) 
-                    != PackageManager.PERMISSION_GRANTED) {
-                return false;
+            String printerName = "unknown";
+            try {
+                printerName = printer.getName();
+            } catch (SecurityException e) {
+                // ignore
             }
+            Log.d(TAG, "Connecting to: " + printerName);
             
-            Log.d(TAG, "Connecting to printer: " + printer.getName());
-            
-            // Create socket
             socket = printer.createRfcommSocketToServiceRecord(SPP_UUID);
-            
-            // Cancel discovery to speed up connection
-            bluetoothAdapter.cancelDiscovery();
-            
-            // Connect with timeout handling
             socket.connect();
             
             Log.d(TAG, "Connected, sending " + data.length + " bytes");
             
-            // Get output stream and write data
             outputStream = socket.getOutputStream();
             outputStream.write(data);
             outputStream.flush();
             
-            // Remember this printer for next time
-            prefs.edit().putString(PREF_LAST_PRINTER, printer.getAddress()).apply();
+            // Wait for data to be sent
+            Thread.sleep(300);
             
-            Log.d(TAG, "Print successful");
+            Log.d(TAG, "Print successful (primary)");
             return true;
             
-        } catch (IOException e) {
-            Log.e(TAG, "Print failed: " + e.getMessage());
-            
-            // Try fallback connection method for older devices
-            return tryFallbackConnection(printer, data);
+        } catch (Exception e) {
+            Log.e(TAG, "Primary connection failed: " + e.getMessage());
+            return false;
             
         } finally {
-            // Clean up
-            try {
-                if (outputStream != null) outputStream.close();
-                if (socket != null) socket.close();
-            } catch (IOException e) {
-                Log.w(TAG, "Error closing connection", e);
-            }
+            closeQuietly(outputStream);
+            closeSocketQuietly(socket);
         }
     }
 
     /**
-     * Fallback connection method using reflection for older Android versions
+     * Fallback using reflection method with specified channel
      */
-    private boolean tryFallbackConnection(BluetoothDevice printer, byte[] data) {
+    private boolean tryFallbackConnection(BluetoothDevice printer, byte[] data, int channel) {
         BluetoothSocket socket = null;
         OutputStream outputStream = null;
         
         try {
-            if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) 
-                    != PackageManager.PERMISSION_GRANTED) {
-                return false;
-            }
+            Log.d(TAG, "Trying fallback (reflection channel " + channel + ")");
             
-            Log.d(TAG, "Trying fallback connection method");
-            
-            // Use reflection to create insecure socket (works better with some printers)
             socket = (BluetoothSocket) printer.getClass()
                     .getMethod("createRfcommSocket", int.class)
-                    .invoke(printer, 1);
+                    .invoke(printer, channel);
             
             socket.connect();
             
@@ -272,50 +400,90 @@ public class BluetoothPrinterManager {
             outputStream.write(data);
             outputStream.flush();
             
-            prefs.edit().putString(PREF_LAST_PRINTER, printer.getAddress()).apply();
+            Thread.sleep(300);
             
-            Log.d(TAG, "Fallback print successful");
+            Log.d(TAG, "Print successful (fallback channel " + channel + ")");
             return true;
             
         } catch (Exception e) {
-            Log.e(TAG, "Fallback connection failed: " + e.getMessage());
+            Log.e(TAG, "Fallback channel " + channel + " failed: " + e.getMessage());
             return false;
             
         } finally {
+            closeQuietly(outputStream);
+            closeSocketQuietly(socket);
+        }
+    }
+    
+    /**
+     * Try insecure RFCOMM connection
+     */
+    private boolean tryInsecureConnection(BluetoothDevice printer, byte[] data) {
+        BluetoothSocket socket = null;
+        OutputStream outputStream = null;
+        
+        try {
+            Log.d(TAG, "Trying insecure connection");
+            
+            socket = printer.createInsecureRfcommSocketToServiceRecord(SPP_UUID);
+            socket.connect();
+            
+            outputStream = socket.getOutputStream();
+            outputStream.write(data);
+            outputStream.flush();
+            
+            Thread.sleep(300);
+            
+            Log.d(TAG, "Print successful (insecure)");
+            return true;
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Insecure connection failed: " + e.getMessage());
+            return false;
+            
+        } finally {
+            closeQuietly(outputStream);
+            closeSocketQuietly(socket);
+        }
+    }
+    
+    private void closeQuietly(OutputStream os) {
+        if (os != null) {
             try {
-                if (outputStream != null) outputStream.close();
-                if (socket != null) socket.close();
+                os.close();
             } catch (IOException e) {
-                Log.w(TAG, "Error closing fallback connection", e);
+                Log.w(TAG, "Error closing output stream", e);
+            }
+        }
+    }
+    
+    private void closeSocketQuietly(BluetoothSocket socket) {
+        if (socket != null) {
+            try {
+                // Give the output buffer time to flush
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                // ignore
+            }
+            try {
+                socket.close();
+                Log.d(TAG, "Socket closed");
+            } catch (IOException e) {
+                Log.w(TAG, "Error closing socket", e);
             }
         }
     }
 
-    /**
-     * Get the address of the last successfully used printer
-     */
     public String getLastPrinterAddress() {
         return prefs.getString(PREF_LAST_PRINTER, null);
     }
 
-    /**
-     * Clear saved printer preference
-     */
     public void forgetLastPrinter() {
         prefs.edit().remove(PREF_LAST_PRINTER).apply();
     }
 
-    /**
-     * Cleanup resources
-     */
     public void cleanup() {
-        if (currentSocket != null) {
-            try {
-                currentSocket.close();
-            } catch (IOException e) {
-                Log.w(TAG, "Error closing socket", e);
-            }
-            currentSocket = null;
-        }
+        // Nothing to clean up - we close sockets immediately after use
+        Log.d(TAG, "cleanup called");
     }
 }
