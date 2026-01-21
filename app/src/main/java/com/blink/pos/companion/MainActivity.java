@@ -278,23 +278,38 @@ public class MainActivity extends AppCompatActivity {
 
     /**
      * Send raw ESC/POS data to Nyx printer (Bitcoinize POS)
+     * 
+     * NOTE: The Nyx SDK does NOT support raw ESC/POS commands.
+     * It only provides high-level methods (printText, printBitmap, printQrCode).
+     * 
+     * For V2 protocol on Nyx, we would need to either:
+     * 1. Render the receipt as a bitmap and use printBitmap
+     * 2. Parse the ESC/POS commands and translate to Nyx SDK calls
+     * 
+     * For now, we log a warning. The web app should use V1 protocol for Nyx printers.
      */
     private void printRawToNyx(byte[] escposData) {
         singleThreadExecutor.submit(() -> {
+            if (printerService == null) {
+                Log.e(TAG, "Nyx printer service not available");
+                return;
+            }
+            
+            // Nyx SDK doesn't support raw ESC/POS - log warning
+            Log.w(TAG, "V2 raw ESC/POS not supported on Nyx printer. Data size: " + escposData.length + " bytes");
+            Log.w(TAG, "Please use V1 protocol (app=voucher) for Bitcoinize POS");
+            
+            // For now, just print a message indicating the issue
             try {
-                if (printerService == null) {
-                    Log.e(TAG, "Nyx printer service not available");
-                    return;
-                }
-                
-                // The Nyx SDK has printRawData method for raw ESC/POS commands
-                int result = printerService.printRawData(escposData, escposData.length);
-                Log.d(TAG, "Nyx raw print result: " + result);
-                
-                // Feed paper
+                PrintTextFormat format = new PrintTextFormat();
+                format.setAli(1);
+                format.setTextSize(24);
+                printerService.printText("V2 protocol not supported", format);
+                printerService.printText("on Nyx/Bitcoinize printer", format);
+                printerService.printText("Use V1 (app=voucher) instead", format);
                 paperOut();
             } catch (RemoteException e) {
-                Log.e(TAG, "Failed to print raw data to Nyx", e);
+                Log.e(TAG, "Failed to print warning message", e);
             }
         });
     }
