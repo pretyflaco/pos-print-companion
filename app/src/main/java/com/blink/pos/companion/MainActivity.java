@@ -901,7 +901,7 @@ public class MainActivity extends AppCompatActivity {
             }
             
             baos.write("================================\n".getBytes());
-            baos.write("voucher.blink.sv\n".getBytes());
+            baos.write("blink.sv\n".getBytes());
             
             if (v.memo != null && !v.memo.isEmpty()) {
                 baos.write(("\n" + v.memo + "\n").getBytes());
@@ -1180,7 +1180,7 @@ public class MainActivity extends AppCompatActivity {
                     printerService.printText(formatSecret(v.voucherSecret), sf);
 
                 printerService.printText(line, fmt);
-                printerService.printText("voucher.blink.sv", sf);
+                printerService.printText("blink.sv", sf);
                 
                 if (v.memo != null && !v.memo.isEmpty()) {
                     printerService.printText("\n", sf);
