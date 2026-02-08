@@ -851,24 +851,24 @@ public class MainActivity extends AppCompatActivity {
             
             baos.write("================================\n".getBytes());
             
-            // Voucher details
+            // Voucher details - right-aligned values for clean layout
             if (v.voucherPrice != null && !v.voucherPrice.isEmpty()) {
-                baos.write(("Price: " + v.voucherPrice + "\n").getBytes());
+                baos.write((formatKVLine("Price:", v.voucherPrice) + "\n").getBytes());
             }
             if (v.voucherAmount != null && !v.voucherAmount.isEmpty()) {
-                baos.write(("Value: " + v.voucherAmount + "\n").getBytes());
+                baos.write((formatKVLine("Value:", v.voucherAmount) + "\n").getBytes());
             }
             if (v.identifierCode != null && !v.identifierCode.isEmpty()) {
-                baos.write(("ID: " + v.identifierCode + "\n").getBytes());
+                baos.write((formatKVLine("ID:", v.identifierCode) + "\n").getBytes());
             }
             if (v.commissionPercentage != null && !v.commissionPercentage.isEmpty() && !"0".equals(v.commissionPercentage)) {
-                baos.write(("Commission: " + v.commissionPercentage + "%\n").getBytes());
+                baos.write((formatKVLine("Commission:", v.commissionPercentage + "%") + "\n").getBytes());
             }
             if (v.expiresAt != null && !v.expiresAt.isEmpty()) {
-                baos.write(("Expires: " + formatExpiry(v.expiresAt) + "\n").getBytes());
+                baos.write((formatKVLine("Expires:", formatExpiry(v.expiresAt)) + "\n").getBytes());
             }
             if (v.issuedBy != null && !v.issuedBy.isEmpty()) {
-                baos.write(("Issued by: " + v.issuedBy + "\n").getBytes());
+                baos.write((formatKVLine("Issued by:", v.issuedBy) + "\n").getBytes());
             }
             
             baos.write("================================\n".getBytes());
@@ -1300,6 +1300,22 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception ex) {
             return e;
         }
+    }
+
+    /**
+     * Format key-value pair for thermal receipt with right-aligned value
+     * Total width is 32 characters (standard for 58mm paper)
+     */
+    private String formatKVLine(String key, String value) {
+        int totalWidth = 32;
+        int padding = Math.max(1, totalWidth - key.length() - value.length());
+        StringBuilder sb = new StringBuilder();
+        sb.append(key);
+        for (int i = 0; i < padding; i++) {
+            sb.append(' ');
+        }
+        sb.append(value);
+        return sb.toString();
     }
 
     private void bindNyxService() {
