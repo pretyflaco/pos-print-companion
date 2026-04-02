@@ -2,6 +2,7 @@ package com.blink.pos.companion;
 
 import android.Manifest;
 import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothClass;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothSocket;
 import android.content.Context;
@@ -41,7 +42,8 @@ public class BluetoothPrinterManager {
         "Thermal", "Receipt", "NETUM", "MUNBYN", "GOOJPRT",
         "BlueTooth Printer", "Bluetooth Printer", "BT Printer",
         "58mm", "80mm", "Mini Printer",
-        "MP-", "MP5", "MP583"  // Mobile printer patterns
+        "MP-", "MP5", "MP583",  // Mobile printer patterns
+        "P58"                   // P58E and similar mini thermal printers
     };
 
     public BluetoothPrinterManager(Context context) {
@@ -85,8 +87,8 @@ public class BluetoothPrinterManager {
             
             for (BluetoothDevice device : pairedDevices) {
                 try {
-                    String name = device.getName();
-                    if (name != null && isProbablyPrinter(name)) {
+                    if (isProbablyPrinter(device)) {
+                        String name = device.getName();
                         printers.add(device);
                         Log.d(TAG, "Found printer: " + name + " (" + device.getAddress() + ")");
                     }
@@ -113,13 +115,36 @@ public class BluetoothPrinterManager {
         }
     }
 
-    private boolean isProbablyPrinter(String name) {
-        if (name == null) return false;
-        String upperName = name.toUpperCase();
-        for (String pattern : PRINTER_NAME_PATTERNS) {
-            if (upperName.contains(pattern.toUpperCase())) {
-                return true;
+    private boolean isProbablyPrinter(BluetoothDevice device) {
+        // Check Bluetooth device class for printer bit
+        try {
+            BluetoothClass btClass = device.getBluetoothClass();
+            if (btClass != null) {
+                int majorClass = btClass.getMajorDeviceClass();
+                int deviceClass = btClass.getDeviceClass();
+                // Major class IMAGING (0x0600) with printer minor bit (0x0080)
+                if (majorClass == BluetoothClass.Device.Major.IMAGING
+                        && (deviceClass & 0x0080) != 0) {
+                    Log.d(TAG, "Device class indicates printer: " + device.getAddress());
+                    return true;
+                }
             }
+        } catch (SecurityException e) {
+            Log.w(TAG, "Permission error reading device class", e);
+        }
+
+        // Fall back to name matching
+        try {
+            String name = device.getName();
+            if (name == null) return false;
+            String upperName = name.toUpperCase();
+            for (String pattern : PRINTER_NAME_PATTERNS) {
+                if (upperName.contains(pattern.toUpperCase())) {
+                    return true;
+                }
+            }
+        } catch (SecurityException e) {
+            Log.w(TAG, "Permission error getting device name", e);
         }
         return false;
     }
