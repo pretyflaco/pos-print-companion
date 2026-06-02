@@ -703,6 +703,7 @@ public class MainActivity extends AppCompatActivity {
             job.paymentData.transactionId = data.getQueryParameter("id");
             job.paymentData.date = data.getQueryParameter("date");
             job.paymentData.time = data.getQueryParameter("time");
+            job.paymentData.memo = data.getQueryParameter("memo");
         }
         
         return job;
@@ -959,47 +960,58 @@ public class MainActivity extends AppCompatActivity {
                 baos.write(new byte[]{0x1B, 0x45, 0x00}); // Bold off
             }
             
+            // ESC a 0 - Left alignment for the details block
+            baos.write(new byte[]{0x1B, 0x61, 0x00});
+
+            // Heavy separator bar
             baos.write("================================\n".getBytes());
-            
-            // Payment details
-            if (p.username != null && !p.username.isEmpty()) {
-                baos.write(("Username: " + p.username + "\n").getBytes());
-            }
-            if (p.amount != null && !p.amount.isEmpty()) {
-                baos.write(("Amount: " + p.amount + "\n").getBytes());
-            }
-            
+
+            // Payment details (left-aligned "Label: value")
             SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
-            SimpleDateFormat tf = new SimpleDateFormat("HH:mm:ss", Locale.US);
+            SimpleDateFormat tf = new SimpleDateFormat("h:mm a", Locale.US);
             String date = (p.date != null && !p.date.isEmpty()) ? p.date : df.format(new Date());
             String time = (p.time != null && !p.time.isEmpty()) ? p.time : tf.format(new Date());
             baos.write(("Date: " + date + "\n").getBytes());
             baos.write(("Time: " + time + "\n").getBytes());
-            
-            baos.write("================================\n".getBytes());
-            
-            if (p.transactionId != null && !p.transactionId.isEmpty()) {
-                baos.write(new byte[]{0x1B, 0x45, 0x01}); // Bold on
-                baos.write("Blink Internal ID\n".getBytes());
-                baos.write(new byte[]{0x1B, 0x45, 0x00}); // Bold off
-                baos.write((p.transactionId + "\n\n").getBytes());
+
+            if (p.username != null && !p.username.isEmpty()) {
+                baos.write(("Merchant: " + p.username + "\n").getBytes());
             }
-            
+            if (p.memo != null && !p.memo.isEmpty()) {
+                baos.write(("Memo: " + p.memo + "\n").getBytes());
+            }
+            if (p.amount != null && !p.amount.isEmpty()) {
+                baos.write(("Amount: " + p.amount + "\n").getBytes());
+            }
+
+            // Heavy separator bar
+            baos.write("================================\n".getBytes());
+
+            // Payment hash (centered heading + wrapped value)
             if (p.paymentHash != null && !p.paymentHash.isEmpty()) {
+                baos.write(new byte[]{0x1B, 0x61, 0x01}); // Center
                 baos.write(new byte[]{0x1B, 0x45, 0x01}); // Bold on
                 baos.write("Payment Hash\n".getBytes());
                 baos.write(new byte[]{0x1B, 0x45, 0x00}); // Bold off
-                // Break long hash into lines
                 String hash = p.paymentHash;
                 int lineLen = 32;
                 for (int i = 0; i < hash.length(); i += lineLen) {
                     baos.write((hash.substring(i, Math.min(i + lineLen, hash.length())) + "\n").getBytes());
                 }
             }
-            
+
+            // Thank you (centered, bold)
+            baos.write(new byte[]{0x1B, 0x61, 0x01}); // Center
+            baos.write(new byte[]{0x1B, 0x45, 0x01}); // Bold on
+            baos.write("Thank You!\n".getBytes());
+            baos.write(new byte[]{0x1B, 0x45, 0x00}); // Bold off
+
+            // Heavy separator bar
+            baos.write("================================\n".getBytes());
+
             // Feed and cut
             baos.write("\n\n\n\n".getBytes());
-            
+
             return baos.toByteArray();
             
         } catch (Exception e) {
@@ -1209,46 +1221,52 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
                 
-                PrintTextFormat fmt = new PrintTextFormat();
-                fmt.setStyle(1);
-                fmt.setTextSize(27);
-                fmt.setAli(1);
-
                 printLogo();
 
-                String line = "--------------------------------";
-                printerService.printText(line, fmt);
+                // Heavy separator bar (centered)
+                PrintTextFormat barFmt = new PrintTextFormat();
+                barFmt.setStyle(1);
+                barFmt.setTextSize(27);
+                barFmt.setAli(1);
+                String bar = "================================";
+                printerService.printText(bar, barFmt);
 
-                if (p.username != null && !p.username.isEmpty())
-                    printKV("Username:", p.username);
-                if (p.amount != null && !p.amount.isEmpty())
-                    printKV("Amount:", p.amount);
-                
+                // Details block (left-aligned "Label: value")
+                PrintTextFormat lf = new PrintTextFormat();
+                lf.setStyle(1);
+                lf.setTextSize(23);
+                lf.setAli(0);
+
                 SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
-                SimpleDateFormat tf = new SimpleDateFormat("HH:mm:ss", Locale.US);
+                SimpleDateFormat tf = new SimpleDateFormat("h:mm a", Locale.US);
                 String date = (p.date != null && !p.date.isEmpty()) ? p.date : df.format(new Date());
                 String time = (p.time != null && !p.time.isEmpty()) ? p.time : tf.format(new Date());
-                printKV("Date:", date);
-                printKV("Time:", time);
+                printerService.printText("Date: " + date, lf);
+                printerService.printText("Time: " + time, lf);
+                if (p.username != null && !p.username.isEmpty())
+                    printerService.printText("Merchant: " + p.username, lf);
+                if (p.memo != null && !p.memo.isEmpty())
+                    printerService.printText("Memo: " + p.memo, lf);
+                if (p.amount != null && !p.amount.isEmpty())
+                    printerService.printText("Amount: " + p.amount, lf);
 
-                printerService.printText(line, fmt);
+                printerService.printText(bar, barFmt);
 
+                // Payment hash (centered heading + value)
                 PrintTextFormat txf = new PrintTextFormat();
                 txf.setAli(1);
                 txf.setTextSize(23);
                 txf.setStyle(1);
-
-                if (p.transactionId != null && !p.transactionId.isEmpty()) {
-                    printerService.printText("Blink Internal Id", txf);
-                    printerService.printText(p.transactionId, txf);
-                    printerService.printText("\n", txf);
-                }
 
                 if (p.paymentHash != null && !p.paymentHash.isEmpty()) {
                     printerService.printText("Payment Hash", txf);
                     printerService.printText(p.paymentHash, txf);
                     printerService.printText("\n", txf);
                 }
+
+                // Thank you (centered)
+                printerService.printText("Thank You!", txf);
+                printerService.printText(bar, barFmt);
 
                 printerService.paperOut(80);
                 mainHandler.post(() -> showToast("Receipt printed"));
@@ -1373,6 +1391,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
     static class PaymentData {
-        String username, amount, paymentHash, transactionId, date, time;
+        String username, amount, paymentHash, transactionId, date, time, memo;
     }
 }

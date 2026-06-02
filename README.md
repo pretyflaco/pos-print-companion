@@ -85,14 +85,32 @@ window.location.href = deepLinkUrl;
 #### Payment Receipt
 ```javascript
 const deepLinkUrl = `blink-pos-companion://print?` +
-  `username=${encodeURIComponent('blink_user')}&` +
-  `amount=${encodeURIComponent('50,000 sats')}&` +
+  `app=payment&` +  // Optional (payment is the default when app is omitted)
+  `username=${encodeURIComponent('blink_user')}&` +  // Shown as "Merchant:"
+  `amount=${encodeURIComponent('5,000 sats ($50.00)')}&` +  // Combined amount string
   `paymentHash=${encodeURIComponent('abc123...')}&` +
-  `id=${encodeURIComponent('txn_12345')}&` +  // Optional
-  `date=${encodeURIComponent('2024-01-15')}&` +  // Optional
-  `time=${encodeURIComponent('14:30:00')}`;  // Optional
+  `memo=${encodeURIComponent('drinks')}&` +  // Optional
+  `date=${encodeURIComponent('2026-01-05')}&` +  // Optional
+  `time=${encodeURIComponent('11:30 pm')}`;  // Optional
 
 window.location.href = deepLinkUrl;
+```
+
+The payment receipt layout (both Nyx and Bluetooth):
+
+```
+        [Blink logo]
+================================
+Date: 2026-01-05
+Time: 11:30 pm
+Merchant: blink_user
+Memo: drinks
+Amount: 5,000 sats ($50.00)
+================================
+         Payment Hash
+ 787ec76dcafd20c1908eb0936a12f...
+          Thank You!
+================================
 ```
 
 ### Protocol V2 (New) - Pre-built ESC/POS Data
@@ -141,10 +159,12 @@ window.location.href = deepLinkUrl;
 | `commissionPercentage` | V1 | Commission % |
 | `expiresAt` | V1 | Expiry timestamp (ms) |
 | `issuedBy` | V1 | Issuer username |
-| `memo` | V1 | Optional memo text |
-| `username` | V1 | Payment username |
-| `amount` | V1 | Payment amount |
+| `memo` | V1 | Optional memo text (voucher and payment) |
+| `username` | V1 | Payment merchant username (shown as "Merchant:") |
+| `amount` | V1 | Payment amount (pre-formatted combined string) |
 | `paymentHash` | V1 | Lightning payment hash |
+| `date` | V1 | Payment date (optional, defaults to today) |
+| `time` | V1 | Payment time (optional, defaults to now) |
 
 ## Troubleshooting
 
