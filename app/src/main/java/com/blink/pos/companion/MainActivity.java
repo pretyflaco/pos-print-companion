@@ -1320,17 +1320,17 @@ public class MainActivity extends AppCompatActivity {
                 if (hasFooter) {
                     printerService.printText(bar, barFmt);
                     if (p.footerHeading != null && !p.footerHeading.isEmpty()) {
-                        printerService.printText(p.footerHeading, txf);
+                        printerService.printText(asciiize(p.footerHeading), txf);
                     }
                     if (p.footerText != null && !p.footerText.isEmpty()) {
-                        printerService.printText(p.footerText, txf);
+                        printerService.printText(asciiize(p.footerText), txf);
                     }
                     if (p.footerQr != null && !p.footerQr.isEmpty()) {
                         printerService.printText("\n", txf);
                         printerService.printQrCode(p.footerQr, 350, 350, 1);
                     }
                     if (p.footerCaption != null && !p.footerCaption.isEmpty()) {
-                        printerService.printText(p.footerCaption, txf);
+                        printerService.printText(asciiize(p.footerCaption), txf);
                     }
                 }
 
@@ -1407,13 +1407,62 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
+     * Transliterate text to printer-safe 7-bit ASCII. Thermal printers default
+     * to CP437, so raw UTF-8 multi-byte chars (smart quotes, em dashes,
+     * accents) would print as mojibake (e.g. an em-dash as "ΓÇö"). Mirrors
+     * lib/escpos/asciiize.ts in the web app. Defense-in-depth: the web side
+     * already transliterates, but this keeps the app robust against any client.
+     */
+    private String asciiize(String input) {
+        if (input == null) return null;
+        StringBuilder sb = new StringBuilder(input.length());
+        for (int i = 0; i < input.length(); i++) {
+            char c = input.charAt(i);
+            switch (c) {
+                case '\u2018': case '\u2019': case '\u201A': case '\u201B':
+                case '\u2032': case '\u00B4':
+                    sb.append('\''); break;
+                case '\u201C': case '\u201D': case '\u201E': case '\u201F':
+                case '\u2033': case '\u00AB': case '\u00BB':
+                    sb.append('"'); break;
+                case '\u2010': case '\u2011': case '\u2012': case '\u2013':
+                case '\u2014': case '\u2015': case '\u2212':
+                    sb.append('-'); break;
+                case '\u2026':
+                    sb.append("..."); break;
+                case '\u00A0': case '\u2009': case '\u202F':
+                    sb.append(' '); break;
+                case '\u20AC': sb.append("EUR"); break;
+                case '\u00A3': sb.append("GBP"); break;
+                case '\u2022': sb.append('*'); break;
+                default:
+                    if (c <= 0x7e && (c >= 0x20 || c == '\n' || c == '\t')) {
+                        sb.append(c);
+                    } else {
+                        // Decompose accents (é -> e) and drop combining marks /
+                        // anything still non-ASCII.
+                        String dec = java.text.Normalizer
+                                .normalize(String.valueOf(c), java.text.Normalizer.Form.NFKD)
+                                .replaceAll("\\p{M}+", "");
+                        for (int j = 0; j < dec.length(); j++) {
+                            char d = dec.charAt(j);
+                            if (d <= 0x7e && d >= 0x20) sb.append(d);
+                        }
+                    }
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
      * Word-wrap text to a maximum line width. Words longer than the width are
-     * hard-split. Returns a list of lines (never null).
+     * hard-split. Returns a list of lines (never null). Input is transliterated
+     * to printer-safe ASCII first so columns count real printed width.
      */
     private java.util.List<String> wrapText(String text, int width) {
         java.util.List<String> lines = new java.util.ArrayList<>();
         if (text == null) return lines;
-        String trimmed = text.trim();
+        String trimmed = asciiize(text).trim();
         if (trimmed.isEmpty()) return lines;
 
         StringBuilder current = new StringBuilder();
