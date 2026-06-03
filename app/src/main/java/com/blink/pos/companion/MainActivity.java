@@ -704,6 +704,11 @@ public class MainActivity extends AppCompatActivity {
             job.paymentData.date = data.getQueryParameter("date");
             job.paymentData.time = data.getQueryParameter("time");
             job.paymentData.memo = data.getQueryParameter("memo");
+            // Optional orange-pill education footer.
+            job.paymentData.footerHeading = data.getQueryParameter("footerHeading");
+            job.paymentData.footerText = data.getQueryParameter("footerText");
+            job.paymentData.footerCaption = data.getQueryParameter("footerCaption");
+            job.paymentData.footerQr = data.getQueryParameter("footerQr");
         }
         
         return job;
@@ -1000,6 +1005,48 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
 
+            // Orange-pill education footer (optional)
+            boolean hasFooter =
+                    (p.footerHeading != null && !p.footerHeading.isEmpty())
+                    || (p.footerText != null && !p.footerText.isEmpty())
+                    || (p.footerCaption != null && !p.footerCaption.isEmpty())
+                    || (p.footerQr != null && !p.footerQr.isEmpty());
+            if (hasFooter) {
+                baos.write("================================\n".getBytes());
+                baos.write(new byte[]{0x1B, 0x61, 0x01}); // Center
+
+                if (p.footerHeading != null && !p.footerHeading.isEmpty()) {
+                    baos.write(new byte[]{0x1B, 0x45, 0x01}); // Bold on
+                    for (String l : wrapText(p.footerHeading, 32)) {
+                        baos.write((l + "\n").getBytes());
+                    }
+                    baos.write(new byte[]{0x1B, 0x45, 0x00}); // Bold off
+                }
+                if (p.footerText != null && !p.footerText.isEmpty()) {
+                    for (String l : wrapText(p.footerText, 32)) {
+                        baos.write((l + "\n").getBytes());
+                    }
+                }
+                if (p.footerQr != null && !p.footerQr.isEmpty()) {
+                    baos.write("\n".getBytes());
+                    try {
+                        Bitmap qrBitmap = generateQRCode(p.footerQr, 300);
+                        if (qrBitmap != null) {
+                            baos.write(bitmapToEscPos(qrBitmap));
+                            qrBitmap.recycle();
+                        }
+                    } catch (Exception e) {
+                        Log.w(TAG, "Could not print footer QR", e);
+                    }
+                }
+                if (p.footerCaption != null && !p.footerCaption.isEmpty()) {
+                    for (String l : wrapText(p.footerCaption, 32)) {
+                        baos.write((l + "\n").getBytes());
+                    }
+                }
+                baos.write("\n".getBytes());
+            }
+
             // Thank you (centered, bold)
             baos.write(new byte[]{0x1B, 0x61, 0x01}); // Center
             baos.write(new byte[]{0x1B, 0x45, 0x01}); // Bold on
@@ -1264,6 +1311,29 @@ public class MainActivity extends AppCompatActivity {
                     printerService.printText("\n", txf);
                 }
 
+                // Orange-pill education footer (optional)
+                boolean hasFooter =
+                        (p.footerHeading != null && !p.footerHeading.isEmpty())
+                        || (p.footerText != null && !p.footerText.isEmpty())
+                        || (p.footerCaption != null && !p.footerCaption.isEmpty())
+                        || (p.footerQr != null && !p.footerQr.isEmpty());
+                if (hasFooter) {
+                    printerService.printText(bar, barFmt);
+                    if (p.footerHeading != null && !p.footerHeading.isEmpty()) {
+                        printerService.printText(p.footerHeading, txf);
+                    }
+                    if (p.footerText != null && !p.footerText.isEmpty()) {
+                        printerService.printText(p.footerText, txf);
+                    }
+                    if (p.footerQr != null && !p.footerQr.isEmpty()) {
+                        printerService.printText("\n", txf);
+                        printerService.printQrCode(p.footerQr, 350, 350, 1);
+                    }
+                    if (p.footerCaption != null && !p.footerCaption.isEmpty()) {
+                        printerService.printText(p.footerCaption, txf);
+                    }
+                }
+
                 // Thank you (centered)
                 printerService.printText("Thank You!", txf);
                 printerService.printText(bar, barFmt);
@@ -1336,6 +1406,42 @@ public class MainActivity extends AppCompatActivity {
         return sb.toString();
     }
 
+    /**
+     * Word-wrap text to a maximum line width. Words longer than the width are
+     * hard-split. Returns a list of lines (never null).
+     */
+    private java.util.List<String> wrapText(String text, int width) {
+        java.util.List<String> lines = new java.util.ArrayList<>();
+        if (text == null) return lines;
+        String trimmed = text.trim();
+        if (trimmed.isEmpty()) return lines;
+
+        StringBuilder current = new StringBuilder();
+        for (String word : trimmed.split("\\s+")) {
+            if (word.length() > width) {
+                if (current.length() > 0) {
+                    lines.add(current.toString());
+                    current.setLength(0);
+                }
+                for (int i = 0; i < word.length(); i += width) {
+                    lines.add(word.substring(i, Math.min(i + width, word.length())));
+                }
+                continue;
+            }
+            if (current.length() == 0) {
+                current.append(word);
+            } else if (current.length() + 1 + word.length() <= width) {
+                current.append(' ').append(word);
+            } else {
+                lines.add(current.toString());
+                current.setLength(0);
+                current.append(word);
+            }
+        }
+        if (current.length() > 0) lines.add(current.toString());
+        return lines;
+    }
+
     private void bindNyxService() {
         try {
             Intent intent = new Intent();
@@ -1392,5 +1498,7 @@ public class MainActivity extends AppCompatActivity {
 
     static class PaymentData {
         String username, amount, paymentHash, transactionId, date, time, memo;
+        // Orange-pill education footer (optional).
+        String footerHeading, footerText, footerCaption, footerQr;
     }
 }
